@@ -5,7 +5,6 @@ on:
   push:
     paths:
       - "sql/**"
-      - "backend/**"   # 你放 CodegenCiRunner 的位置
       - ".github/workflows/codegen.yml"
 
 jobs:
@@ -27,32 +26,50 @@ jobs:
           --health-retries=20
 
     steps:
-      - uses: actions/checkout@v4
+      # 1) checkout SQL 仓库（当前仓库）
+      - name: Checkout sql repo
+        uses: actions/checkout@v4
+        with:
+          path: sql-repo
 
-      - uses: actions/setup-java@v4
+      # 2) checkout 生成器仓库（新项目：future-codegen-runner）
+      - name: Checkout runner repo
+        uses: actions/checkout@v4
+        with:
+          repository: FutureTechQuant/future-codegen-runner
+          path: runner
+          # 如果 runner 是 public，可删除 token 这一行
+          token: ${{ secrets.RUNNER_REPO_TOKEN }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
           cache: maven
+          # 如果 pom 不在 runner/pom.xml，请改这里
+          cache-dependency-path: runner/pom.xml
 
       - name: Import SQL
         run: |
           sudo apt-get update
           sudo apt-get install -y mysql-client
-          for f in sql/schema/*.sql; do
+          for f in sql-repo/sql/schema/*.sql; do
             mysql -h 127.0.0.1 -P 3306 -uroot -proot codegen_db < "$f"
           done
 
-      - name: Run codegen
+      - name: Run codegen (in runner project)
         env:
           DB_URL: jdbc:mysql://127.0.0.1:3306/codegen_db?useSSL=false&serverTimezone=UTC
           DB_USER: root
           DB_PWD: root
+          # 建议让你的 CodegenCiRunnerTest 读取这个输出目录
+          CODEGEN_OUTPUT_DIR: ${{ github.workspace }}/out/generated
         run: |
-          mvn -q -DskipTests=false -Dtest=CodegenCiRunnerTest test
+          mvn -q -f runner/pom.xml -DskipTests=false -Dtest=CodegenCiRunnerTest test
 
       - name: Upload generated code
         uses: actions/upload-artifact@v4
         with:
           name: generated-code
-          path: generated/
+          path: out/generated
