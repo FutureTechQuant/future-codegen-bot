@@ -11,6 +11,9 @@ jobs:
   gen:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+
     services:
       mysql:
         image: mysql:8.0
@@ -25,19 +28,18 @@ jobs:
           --health-timeout=5s
           --health-retries=20
 
+    env:
+      RUNNER_REPO_URL: https://github.com/FutureTechQuant/future-codegen-runner.git
+      RUNNER_REF: main
+
     steps:
-      # 1) checkout SQL 仓库（当前仓库）
       - name: Checkout sql repo
         uses: actions/checkout@v4
-        with:
-          path: sql-repo
 
-      # 2) checkout 生成器仓库（新项目：future-codegen-runner）
-      - name: Checkout runner repo
-        uses: actions/checkout@v4
-        with:
-          repository: FutureTechQuant/future-codegen-runner
-          path: runner
+      - name: Clone runner repo (public)
+        run: |
+          git clone --depth 1 --branch "${RUNNER_REF}" "${RUNNER_REPO_URL}" runner
+          ls -la runner
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -45,23 +47,21 @@ jobs:
           distribution: temurin
           java-version: "17"
           cache: maven
-          # 如果 pom 不在 runner/pom.xml，请改这里
           cache-dependency-path: runner/pom.xml
 
       - name: Import SQL
         run: |
           sudo apt-get update
           sudo apt-get install -y mysql-client
-          for f in sql-repo/sql/schema/*.sql; do
+          for f in sql/schema/*.sql; do
             mysql -h 127.0.0.1 -P 3306 -uroot -proot codegen_db < "$f"
           done
 
-      - name: Run codegen (in runner project)
+      - name: Run codegen
         env:
           DB_URL: jdbc:mysql://127.0.0.1:3306/codegen_db?useSSL=false&serverTimezone=UTC
           DB_USER: root
           DB_PWD: root
-          # 建议让你的 CodegenCiRunnerTest 读取这个输出目录
           CODEGEN_OUTPUT_DIR: ${{ github.workspace }}/out/generated
         run: |
           mvn -q -f runner/pom.xml -DskipTests=false -Dtest=CodegenCiRunnerTest test
