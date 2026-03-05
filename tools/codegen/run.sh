@@ -244,7 +244,14 @@ for f in "${sql_files[@]}"; do
 
   rm -rf "${CODEGEN_OUTPUT_DIR}" && mkdir -p "${CODEGEN_OUTPUT_DIR}"
 
-  mvn -q -f "${RUOYI_DIR}/pom.xml" -pl "${MODULE_DIR}" -am -Dtest=ci.codegen.CiCodegenTest test
+  # 1) 先把目标模块及其依赖编译好，但不跑任何测试（避免 yudao-common 之类模块报“找不到指定测试”）
+  mvn -q -f "${RUOYI_DIR}/pom.xml" -pl "${MODULE_DIR}" -am -DskipTests package
+  
+  # 2) 再只在包含 CiCodegenTest 的模块里执行测试
+  mvn -q -f "${RUOYI_DIR}/pom.xml" -pl "${MODULE_DIR}" \
+    -Dtest=ci.codegen.CiCodegenTest \
+    -Dsurefire.failIfNoSpecifiedTests=false \
+    test
 done
 
 echo "Generated under ${ROOT}/out/generated"
