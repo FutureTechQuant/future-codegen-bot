@@ -29,7 +29,17 @@ ensure_repo() {
 
   rm -rf "${seed_dir}"
   git clone --depth 1 "${upstream}" "${seed_dir}"
-  gh repo create "${OWNER}/${repo}" --private --source "${seed_dir}" --push
+
+  # 把 Gitee 的 origin 改成 upstream，给 GitHub 的 origin 腾位置
+  if git -C "${seed_dir}" remote get-url origin >/dev/null 2>&1; then
+    git -C "${seed_dir}" remote rename origin upstream
+  fi
+
+  gh repo create "${OWNER}/${repo}" \
+    --private \
+    --source "${seed_dir}" \
+    --remote origin \
+    --push
 }
 
 clone_target() {
