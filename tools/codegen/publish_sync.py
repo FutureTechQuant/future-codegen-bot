@@ -135,10 +135,10 @@ def sync_workflow_templates(project_root: Path, backend_root: Path, frontend_roo
     backend_template = project_root / "templates" / "workflows" / "backend-maven.yml"
     frontend_template = project_root / "templates" / "workflows" / "frontend-build.yml"
 
-    copy_file(backend_template, backend_root / ".github" / "workflows" / "maven.yml")
+    copy_file(backend_template, backend_root / ".github" / "workflows" / "backend-maven.yml")
     print(f"Synced backend workflow from {backend_template}")
 
-    copy_file(frontend_template, frontend_root / ".github" / "workflows" / "build.yml")
+    copy_file(frontend_template, frontend_root / ".github" / "workflows" / "frontend-build.yml")
     print(f"Synced frontend workflow from {frontend_template}")
 
 
