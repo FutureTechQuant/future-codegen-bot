@@ -8,13 +8,10 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.*;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.*;
 
 public class CiCodegenTest {
@@ -28,6 +25,7 @@ public class CiCodegenTest {
     String outDir = mustEnv("CODEGEN_OUTPUT_DIR");
     String moduleName = mustEnv("CODEGEN_MODULE_NAME");
     String basePackage = mustEnv("CODEGEN_BASE_PACKAGE");
+    String tablePrefix = System.getenv().getOrDefault("CODEGEN_TABLE_PREFIX", moduleName + "_");
 
     Class<?> engineClz = Class.forName(engineClassName);
     Object engine = engineClz.getDeclaredConstructor().newInstance();
@@ -41,36 +39,152 @@ public class CiCodegenTest {
     tryInvoke(engine, "initGlobalBindingMap");
 
     try (Connection conn = DriverManager.getConnection(url, user, pwd)) {
-      String schema = conn.getCatalog();
+      List<CodegenTableDO> tables = listCodegenTables(conn, tablePrefix, moduleName);
+      if (tables.isEmpty()) {
+        throw new IllegalStateException(
+            "No rows found in infra_codegen_table for prefix: " + tablePrefix +
+            ". Please import business tables into infra_codegen_table / infra_codegen_column first.");
+      }
 
       Integer frontType = resolveVue3FrontType();
       Integer templateType = pickSimpleTemplateType();
       Integer scene = CodegenSceneEnum.values()[0].getScene();
 
-      for (String tableName : listAllTables(conn, schema)) {
-        String tableComment = getTableComment(conn, schema, tableName);
-        List<CodegenColumnDO> columns = listColumns(conn, schema, tableName);
-
-        CodegenTableDO table = new CodegenTableDO();
-        tryInvoke(table, "setTableName", tableName);
-        tryInvoke(table, "setComment", tableComment);
-
-        table.setModuleName(moduleName);
-        table.setBusinessName(tableName);
-        table.setClassName(toClassName(tableName));
-
+      for (CodegenTableDO table : tables) {
         if (frontType != null) {
           table.setFrontType(frontType);
         }
+        if (table.getTemplateType() == null) {
+          table.setTemplateType(templateType);
+        }
+        if (table.getScene() == null) {
+          table.setScene(scene);
+        }
+        if (isBlank(table.getModuleName())) {
+          table.setModuleName(moduleName);
+        }
+        if (isBlank(table.getBusinessName())) {
+          table.setBusinessName(defaultBusinessName(table.getTableName(), tablePrefix));
+        }
+        if (isBlank(table.getClassName())) {
+          table.setClassName(toClassName(table.getTableName()));
+        }
 
-        table.setTemplateType(templateType);
-        table.setScene(scene);
+        List<CodegenColumnDO> columns = listCodegenColumns(conn, table.getId());
+        if (columns.isEmpty()) {
+          throw new IllegalStateException("No rows found in infra_codegen_column for tableId=" + table.getId());
+        }
 
         @SuppressWarnings("unchecked")
         Map<String, String> files = (Map<String, String>) invokeExecute(engineClz, engine, table, columns);
         writeAll(outDir, files);
       }
     }
+  }
+
+  private static List<CodegenTableDO> listCodegenTables(Connection conn, String tablePrefix, String moduleName) throws Exception {
+    String sql = """
+        SELECT *
+        FROM infra_codegen_table
+        WHERE table_name LIKE ?
+           OR module_name = ?
+           OR business_name LIKE ?
+        ORDER BY id
+        """;
+    List<CodegenTableDO> list = new ArrayList<>();
+    try (PreparedStatement ps = conn.prepareStatement(sql)) {
+      ps.setString(1, tablePrefix + "%");
+      ps.setString(2, moduleName);
+      ps.setString(3, tablePrefix + "%");
+      try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) {
+          CodegenTableDO table = new CodegenTableDO();
+          hydrateFromResultSet(rs, table);
+          if (isBlank(table.getTableName())) {
+            continue;
+          }
+          list.add(table);
+        }
+      }
+    }
+    return list;
+  }
+
+  private static List<CodegenColumnDO> listCodegenColumns(Connection conn, Long tableId) throws Exception {
+    String sql = """
+        SELECT *
+        FROM infra_codegen_column
+        WHERE table_id = ?
+        ORDER BY id
+        """;
+    List<CodegenColumnDO> list = new ArrayList<>();
+    try (PreparedStatement ps = conn.prepareStatement(sql)) {
+      ps.setLong(1, tableId);
+      try (ResultSet rs = ps.executeQuery()) {
+        while (rs.next()) {
+          CodegenColumnDO col = new CodegenColumnDO();
+          hydrateFromResultSet(rs, col);
+          list.add(col);
+        }
+      }
+    }
+    return list;
+  }
+
+  private static void hydrateFromResultSet(ResultSet rs, Object bean) throws Exception {
+    ResultSetMetaData md = rs.getMetaData();
+    for (int i = 1; i <= md.getColumnCount(); i++) {
+      String column = md.getColumnLabel(i);
+      Object value = rs.getObject(i);
+      if (value == null) {
+        continue;
+      }
+      tryInvokeSetter(bean, toSetter(column), value);
+    }
+  }
+
+  private static String toSetter(String column) {
+    StringBuilder sb = new StringBuilder("set");
+    boolean upper = true;
+    for (char ch : column.toCharArray()) {
+      if (ch == '_') {
+        upper = true;
+        continue;
+      }
+      sb.append(upper ? Character.toUpperCase(ch) : ch);
+      upper = false;
+    }
+    return sb.toString();
+  }
+
+  private static void tryInvokeSetter(Object target, String setter, Object value) {
+    for (Method m : target.getClass().getMethods()) {
+      if (!m.getName().equals(setter) || m.getParameterCount() != 1) {
+        continue;
+      }
+      try {
+        Class<?> pt = m.getParameterTypes()[0];
+        m.invoke(target, convertValue(value, pt));
+        return;
+      } catch (Exception ignore) {
+      }
+    }
+  }
+
+  private static Object convertValue(Object value, Class<?> targetType) {
+    if (value == null) return null;
+    if (targetType.isInstance(value)) return value;
+
+    String s = String.valueOf(value);
+
+    if (targetType == String.class) return s;
+    if (targetType == Integer.class || targetType == int.class) return Integer.valueOf(s);
+    if (targetType == Long.class || targetType == long.class) return Long.valueOf(s);
+    if (targetType == Boolean.class || targetType == boolean.class) {
+      if (value instanceof Number n) return n.intValue() != 0;
+      return "1".equals(s) || "true".equalsIgnoreCase(s);
+    }
+    return value;
   }
 
   private static Object invokeExecute(Class<?> engineClz, Object engine,
@@ -132,61 +246,6 @@ public class CiCodegenTest {
     return CodegenTemplateTypeEnum.values()[0].getType();
   }
 
-  private static List<String> listAllTables(Connection conn, String schema) throws SQLException {
-    List<String> list = new ArrayList<>();
-    try (PreparedStatement ps = conn.prepareStatement(
-        "select table_name from information_schema.tables where table_schema=? and table_type='BASE TABLE'")) {
-      ps.setString(1, schema);
-      try (ResultSet rs = ps.executeQuery()) {
-        while (rs.next()) list.add(rs.getString(1));
-      }
-    }
-    return list;
-  }
-
-  private static String getTableComment(Connection conn, String schema, String table) throws SQLException {
-    try (PreparedStatement ps = conn.prepareStatement(
-        "select table_comment from information_schema.tables where table_schema=? and table_name=?")) {
-      ps.setString(1, schema);
-      ps.setString(2, table);
-      try (ResultSet rs = ps.executeQuery()) {
-        if (rs.next()) return rs.getString(1);
-      }
-    }
-    return "";
-  }
-
-  private static List<CodegenColumnDO> listColumns(Connection conn, String schema, String table) throws SQLException {
-    List<CodegenColumnDO> list = new ArrayList<>();
-    try (PreparedStatement ps = conn.prepareStatement(
-        "select column_name, data_type, column_key, is_nullable, column_comment " +
-        "from information_schema.columns where table_schema=? and table_name=? order by ordinal_position")) {
-      ps.setString(1, schema);
-      ps.setString(2, table);
-      try (ResultSet rs = ps.executeQuery()) {
-        while (rs.next()) {
-          String columnName = rs.getString(1);
-          String dataType = rs.getString(2);
-          boolean pk = "PRI".equalsIgnoreCase(rs.getString(3));
-          boolean nullable = "YES".equalsIgnoreCase(rs.getString(4));
-          String comment = rs.getString(5);
-
-          CodegenColumnDO c = new CodegenColumnDO();
-          tryInvoke(c, "setColumnName", columnName);
-          tryInvoke(c, "setComment", comment);
-
-          c.setJavaField(toJavaField(columnName));
-          c.setJavaType(mapJavaType(dataType));
-          c.setPrimaryKey(pk);
-          tryInvoke(c, "setNullable", nullable);
-
-          list.add(c);
-        }
-      }
-    }
-    return list;
-  }
-
   private static void writeAll(String outDir, Map<String, String> files) throws Exception {
     Path base = Path.of(outDir);
     for (Map.Entry<String, String> e : files.entrySet()) {
@@ -194,6 +253,13 @@ public class CiCodegenTest {
       Files.createDirectories(p.getParent());
       Files.writeString(p, e.getValue(), StandardCharsets.UTF_8);
     }
+  }
+
+  private static String defaultBusinessName(String tableName, String prefix) {
+    if (tableName != null && prefix != null && tableName.startsWith(prefix)) {
+      return tableName.substring(prefix.length());
+    }
+    return tableName;
   }
 
   private static String toClassName(String name) {
@@ -205,24 +271,8 @@ public class CiCodegenTest {
     return sb.toString();
   }
 
-  private static String toJavaField(String name) {
-    String cls = toClassName(name);
-    return cls.substring(0, 1).toLowerCase(Locale.ROOT) + cls.substring(1);
-  }
-
-  private static String mapJavaType(String mysqlType) {
-    String t = mysqlType.toLowerCase(Locale.ROOT);
-    return switch (t) {
-      case "varchar", "char", "text", "longtext", "mediumtext", "tinytext" -> String.class.getName();
-      case "bigint" -> Long.class.getName();
-      case "int", "integer", "mediumint", "smallint", "tinyint" -> Integer.class.getName();
-      case "decimal", "numeric" -> BigDecimal.class.getName();
-      case "datetime", "timestamp" -> LocalDateTime.class.getName();
-      case "date" -> LocalDate.class.getName();
-      case "double" -> Double.class.getName();
-      case "float" -> Float.class.getName();
-      default -> String.class.getName();
-    };
+  private static boolean isBlank(String s) {
+    return s == null || s.isBlank();
   }
 
   private static String mustEnv(String k) {
