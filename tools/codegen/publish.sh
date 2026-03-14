@@ -28,18 +28,16 @@ ensure_repo() {
   fi
 
   rm -rf "${seed_dir}"
-  git clone --depth 1 "${upstream}" "${seed_dir}"
+  git clone "${upstream}" "${seed_dir}"
 
-  # 把 Gitee 的 origin 改成 upstream，给 GitHub 的 origin 腾位置
   if git -C "${seed_dir}" remote get-url origin >/dev/null 2>&1; then
     git -C "${seed_dir}" remote rename origin upstream
   fi
 
-  gh repo create "${OWNER}/${repo}" \
-    --private \
-    --source "${seed_dir}" \
-    --remote origin \
-    --push
+  gh repo create "${OWNER}/${repo}" --private
+
+  git -C "${seed_dir}" remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${OWNER}/${repo}.git"
+  git -C "${seed_dir}" push -u origin HEAD
 }
 
 clone_target() {
