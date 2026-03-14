@@ -45,6 +45,51 @@ jobs:
           path: ruoyi
           fetch-depth: 1
 
+      - name: Debug .vm template sources
+        run: |
+          set -euo pipefail
+          cd ruoyi
+
+          echo "== find all .vm files =="
+          find . -type f -name '*.vm' | sort || true
+
+          echo "== search old codegen variables in .vm templates =="
+          git grep -n -E '\$\{saveReqVOClass\}|\$\{saveReqVOVar\}|\$\{updateReqVOClass\}|\$\{updateReqVOVar\}|\$\{respVOClass\}|\$\{table.classComment\}' -- '*.vm' || true
+
+          echo "== search controller templates =="
+          find . -type f -name '*controller*.vm' | sort || true
+
+          echo "== search service templates =="
+          find . -type f \( -name '*service*.vm' -o -name '*Service*.vm' \) | sort || true
+
+      - name: Preview matched .vm templates
+        run: |
+          set -euo pipefail
+          cd ruoyi
+
+          files="$(git grep -l -E '\$\{saveReqVOClass\}|\$\{saveReqVOVar\}|\$\{updateReqVOClass\}|\$\{updateReqVOVar\}|\$\{respVOClass\}|\$\{table.classComment\}' -- '*.vm' || true)"
+
+          if [[ -z "${files}" ]]; then
+            echo "No matched .vm templates found"
+            exit 0
+          fi
+
+          while IFS= read -r f; do
+            [[ -z "${f}" ]] && continue
+            echo "=================================================="
+            echo "FILE: ${f}"
+            echo "=================================================="
+            nl -ba "${f}" | sed -n '1,240p'
+          done <<< "${files}"
+
+      - name: Debug template vars in repo
+        run: |
+          set -euo pipefail
+          cd ruoyi
+
+          echo "== search old template vars in whole repo =="
+          git grep -n -E '\$\{saveReqVOClass\}|\$\{saveReqVOVar\}|\$\{updateReqVOClass\}|\$\{updateReqVOVar\}|\$\{respVOClass\}|\$\{table.classComment\}' || true
+
       - name: Setup Java
         uses: actions/setup-java@v5
         with:
@@ -65,23 +110,6 @@ jobs:
           app-id: ${{ vars.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: FutureTechQuant
-
-      - name: Debug .vm template sources
-        run: |
-          set -euo pipefail
-          cd ruoyi
-
-          echo "== find all .vm files =="
-          find . -type f -name '*.vm' | sort || true
-
-          echo "== search old codegen variables in .vm templates =="
-          git grep -n -E '\$\{saveReqVOClass\}|\$\{saveReqVOVar\}|\$\{updateReqVOClass\}|\$\{updateReqVOVar\}|\$\{respVOClass\}' -- '*.vm' || true
-
-          echo "== search controller templates =="
-          find . -type f -name '*controller*.vm' | sort || true
-
-          echo "== search service templates =="
-          find . -type f \( -name '*service*.vm' -o -name '*Service*.vm' \) | sort || true
 
       - name: Run codegen
         env:
@@ -175,7 +203,7 @@ jobs:
           set -euo pipefail
 
           echo "== search unreplaced template variables in generated output =="
-          if grep -R '\${' -n out/generated; then
+          if grep -R '\\${' -n out/generated; then
             echo "WARNING: found unreplaced template variables in generated files"
           else
             echo "OK: no unreplaced template variables found under out/generated"
