@@ -57,6 +57,7 @@ jobs:
           MYSQL_PORT: 3306
           MYSQL_USER: root
           MYSQL_PWD: root
+          CODEGEN_BASE_PACKAGE: cn.iocoder.yudao
         run: |
           bash tools/codegen/run.sh
 
