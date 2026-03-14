@@ -2,6 +2,7 @@ spring:
   autoconfigure:
     exclude:
       - com.alibaba.druid.spring.boot.autoconfigure.DruidDataSourceAutoConfigure
+      - com.alibaba.druid.spring.boot3.autoconfigure.DruidDataSourceAutoConfigure
       - org.springframework.boot.autoconfigure.quartz.QuartzAutoConfiguration
       - de.codecentric.boot.admin.server.config.AdminServerAutoConfiguration
       - de.codecentric.boot.admin.server.ui.config.AdminServerUiAutoConfiguration
@@ -18,7 +19,9 @@ spring:
         enabled: false
 
   datasource:
+    type: com.zaxxer.hikari.HikariDataSource
     dynamic:
+      enabled: true
       primary: master
       strict: false
       datasource:
@@ -28,6 +31,7 @@ spring:
           username: ${DB_USER}
           password: ${DB_PWD}
           driver-class-name: com.mysql.cj.jdbc.Driver
+          type: com.zaxxer.hikari.HikariDataSource
         slave:
           lazy: true
           name: slave
@@ -35,6 +39,7 @@ spring:
           username: ${DB_USER}
           password: ${DB_PWD}
           driver-class-name: com.mysql.cj.jdbc.Driver
+          type: com.zaxxer.hikari.HikariDataSource
 
 yudao:
   captcha:
