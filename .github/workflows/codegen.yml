@@ -76,6 +76,94 @@ jobs:
         run: |
           bash tools/codegen/run.sh
 
+      - name: Debug codegen metadata in MySQL
+        env:
+          MYSQL_HOST: 127.0.0.1
+          MYSQL_PORT: 3306
+          MYSQL_USER: root
+          MYSQL_PWD: root
+        run: |
+          set -euo pipefail
+
+          mysql_cmd() {
+            mysql -h"${MYSQL_HOST}" -P"${MYSQL_PORT}" -u"${MYSQL_USER}" --batch --raw --skip-column-names "$@"
+          }
+
+          CODEGEN_SCHEMA="$(mysql_cmd -e "
+            SELECT t1.table_schema
+            FROM information_schema.tables t1
+            JOIN information_schema.tables t2
+              ON t1.table_schema = t2.table_schema
+            WHERE t1.table_name = 'infra_codegen_table'
+              AND t2.table_name = 'infra_codegen_column'
+            ORDER BY t1.table_schema
+            LIMIT 1;
+          ")"
+
+          if [[ -z "${CODEGEN_SCHEMA}" ]]; then
+            echo "WARNING: cannot find schema containing infra_codegen_table and infra_codegen_column"
+            echo "Available schemas:"
+            mysql_cmd -e "SHOW DATABASES;"
+            exit 0
+          fi
+
+          echo "Detected codegen schema: ${CODEGEN_SCHEMA}"
+
+          echo "== infra_codegen_table / infra_codegen_column counts =="
+          mysql_cmd -e "
+            SELECT 'infra_codegen_table', COUNT(*) FROM \`${CODEGEN_SCHEMA}\`.infra_codegen_table
+            UNION ALL
+            SELECT 'infra_codegen_column', COUNT(*) FROM \`${CODEGEN_SCHEMA}\`.infra_codegen_column;
+          "
+
+          echo "== latest infra_codegen_table rows =="
+          mysql_cmd -e "
+            SELECT id, table_name, table_comment, class_name, class_comment, module_name, business_name
+            FROM \`${CODEGEN_SCHEMA}\`.infra_codegen_table
+            ORDER BY id DESC
+            LIMIT 30;
+          "
+
+          echo "== latest infra_codegen_column rows =="
+          mysql_cmd -e "
+            SELECT id, table_id, column_name, column_comment, java_type, java_field, html_type, dict_type
+            FROM \`${CODEGEN_SCHEMA}\`.infra_codegen_column
+            ORDER BY id DESC
+            LIMIT 80;
+          "
+
+          echo "== talent_* related rows from infra_codegen_table =="
+          mysql_cmd -e "
+            SELECT id, table_name, table_comment, class_name, class_comment, module_name, business_name
+            FROM \`${CODEGEN_SCHEMA}\`.infra_codegen_table
+            WHERE table_name LIKE 'talent_%'
+               OR class_name LIKE '%Talent%'
+               OR business_name LIKE '%talent%'
+            ORDER BY id;
+          "
+
+          echo "== talent_* related rows from infra_codegen_column =="
+          mysql_cmd -e "
+            SELECT c.id, c.table_id, t.table_name, c.column_name, c.column_comment, c.java_type, c.java_field
+            FROM \`${CODEGEN_SCHEMA}\`.infra_codegen_column c
+            JOIN \`${CODEGEN_SCHEMA}\`.infra_codegen_table t ON c.table_id = t.id
+            WHERE t.table_name LIKE 'talent_%'
+               OR t.class_name LIKE '%Talent%'
+               OR t.business_name LIKE '%talent%'
+            ORDER BY t.table_name, c.id;
+          "
+
+      - name: Debug unreplaced template variables
+        run: |
+          set -euo pipefail
+
+          echo "== search unreplaced template variables in generated output =="
+          if grep -R '\${' -n out/generated; then
+            echo "WARNING: found unreplaced template variables in generated files"
+          else
+            echo "OK: no unreplaced template variables found under out/generated"
+          fi
+
       - name: Recreate target repos from Gitee
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
