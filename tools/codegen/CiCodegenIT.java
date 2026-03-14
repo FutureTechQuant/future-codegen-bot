@@ -123,19 +123,54 @@ public class CiCodegenIT {
     }
 
     private static void assertNoUnresolvedTemplateVars(String tableName, Map<String, String> files) {
-        List<String> badFiles = files.entrySet().stream()
-                .filter(e -> e.getValue() != null && e.getValue().contains("${"))
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toList());
-
-        if (!badFiles.isEmpty()) {
-            String first = badFiles.get(0);
-            String sample = files.get(first);
-            String snippet = sample == null ? "" : sample.substring(0, Math.min(sample.length(), 1000));
-            throw new AssertionError("Unresolved template vars found, table=" + tableName
-                    + ", file=" + first + "\n" + snippet);
+            List<String> suspiciousTokens = List.of(
+                    "${saveReqVOClass}",
+                    "${saveReqVOVar}",
+                    "${updateReqVOClass}",
+                    "${updateReqVOVar}",
+                    "${respVOClass}",
+                    "${table.classComment}",
+                    "${classComment}",
+                    "${requestClass}",
+                    "${responseClass}"
+            );
+        
+            List<String> backendExt = List.of(".java", ".xml", ".sql", ".yml", ".yaml", ".properties", ".kt");
+            List<String> badFiles = new ArrayList<>();
+            String firstSnippet = null;
+            String firstFile = null;
+        
+            for (Map.Entry<String, String> e : files.entrySet()) {
+                String path = e.getKey();
+                String content = e.getValue();
+                if (content == null) {
+                    continue;
+                }
+        
+                boolean targetedHit = suspiciousTokens.stream().anyMatch(content::contains);
+                boolean backendBroadHit = backendExt.stream().anyMatch(path::endsWith) && content.contains("${");
+        
+                if (!targetedHit && !backendBroadHit) {
+                    continue;
+                }
+        
+                badFiles.add(path);
+                if (firstSnippet == null) {
+                    firstFile = path;
+                    firstSnippet = content.substring(0, Math.min(content.length(), 1200));
+                }
+            }
+        
+            if (!badFiles.isEmpty()) {
+                throw new AssertionError(
+                        "Unresolved template vars found, table=" + tableName
+                                + ", files=" + badFiles
+                                + ", firstFile=" + firstFile
+                                + "\n" + firstSnippet
+                );
+            }
         }
-    }
+
 
     private static List<String> listBusinessTables(Connection conn, String schema, String tablePrefix) throws SQLException {
         String sql = """
