@@ -21,20 +21,21 @@ public class CiCodegenTest {
 
   @Test
   public void generate() throws Exception {
-    String engineClassName = mustEnv("CODEGEN_ENGINE_CLASS"); // 由 run.sh 注入
+    String engineClassName = mustEnv("CODEGEN_ENGINE_CLASS");
     String url = mustEnv("DB_URL");
     String user = mustEnv("DB_USER");
     String pwd = mustEnv("DB_PWD");
     String outDir = mustEnv("CODEGEN_OUTPUT_DIR");
-    String moduleName = mustEnv("CODEGEN_MODULE_NAME"); // = sql/schema/xxx.sql 的 xxx
+    String moduleName = mustEnv("CODEGEN_MODULE_NAME");
+    String basePackage = mustEnv("CODEGEN_BASE_PACKAGE");
 
     Class<?> engineClz = Class.forName(engineClassName);
     Object engine = engineClz.getDeclaredConstructor().newInstance();
 
-    // 尽量兼容：注入 codegenProperties + initGlobalBindingMap（字段/方法存在就调用，不存在就跳过）
     Object props = tryNew("cn.iocoder.yudao.module.infra.framework.codegen.config.CodegenProperties");
     if (props != null) {
       tryInvoke(props, "setUnitTestEnable", false);
+      tryInvoke(props, "setBasePackage", basePackage);
       trySetField(engineClz, engine, "codegenProperties", props);
     }
     tryInvoke(engine, "initGlobalBindingMap");
@@ -42,7 +43,7 @@ public class CiCodegenTest {
     try (Connection conn = DriverManager.getConnection(url, user, pwd)) {
       String schema = conn.getCatalog();
 
-      Integer frontType = resolveVue3FrontType(); // 反射获取 Vue3 的 frontType
+      Integer frontType = resolveVue3FrontType();
       Integer templateType = pickSimpleTemplateType();
       Integer scene = CodegenSceneEnum.values()[0].getScene();
 
@@ -54,14 +55,10 @@ public class CiCodegenTest {
         tryInvoke(table, "setTableName", tableName);
         tryInvoke(table, "setComment", tableComment);
 
-        // 关键：moduleName 用 sql 文件名（xxx.sql => xxx）
         table.setModuleName(moduleName);
-
-        // 先不做“去前缀”假设，避免你说的历史坑
         table.setBusinessName(tableName);
         table.setClassName(toClassName(tableName));
 
-        // frontType：用反射拿到 Vue3（尽量 element-plus）
         if (frontType != null) {
           table.setFrontType(frontType);
         }
@@ -78,9 +75,6 @@ public class CiCodegenTest {
 
   private static Object invokeExecute(Class<?> engineClz, Object engine,
                                       CodegenTableDO table, List<CodegenColumnDO> columns) throws Exception {
-    // 兼容两类签名：
-    // 1) execute(DbType, table, columns, subTables, subColumns)
-    // 2) execute(table, columns, subTables, subColumns)（老版本）
     for (Method m : engineClz.getMethods()) {
       if (!m.getName().equals("execute")) continue;
       int n = m.getParameterCount();
@@ -108,8 +102,6 @@ public class CiCodegenTest {
   }
 
   private static Integer resolveVue3FrontType() {
-    // 反射读取 cn.iocoder.yudao.module.infra.enums.codegen.CodegenFrontTypeEnum
-    // 按优先级：VUE3 + ELEMENT > VUE3
     try {
       Class<?> enumClz = Class.forName("cn.iocoder.yudao.module.infra.enums.codegen.CodegenFrontTypeEnum");
       Object[] constants = enumClz.getEnumConstants();
