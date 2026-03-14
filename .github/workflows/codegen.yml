@@ -66,6 +66,23 @@ jobs:
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: FutureTechQuant
 
+      - name: Debug .vm template sources
+        run: |
+          set -euo pipefail
+          cd ruoyi
+
+          echo "== find all .vm files =="
+          find . -type f -name '*.vm' | sort || true
+
+          echo "== search old codegen variables in .vm templates =="
+          git grep -n -E '\$\{saveReqVOClass\}|\$\{saveReqVOVar\}|\$\{updateReqVOClass\}|\$\{updateReqVOVar\}|\$\{respVOClass\}' -- '*.vm' || true
+
+          echo "== search controller templates =="
+          find . -type f -name '*controller*.vm' | sort || true
+
+          echo "== search service templates =="
+          find . -type f \( -name '*service*.vm' -o -name '*Service*.vm' \) | sort || true
+
       - name: Run codegen
         env:
           MYSQL_HOST: 127.0.0.1
