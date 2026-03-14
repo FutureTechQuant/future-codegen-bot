@@ -70,7 +70,7 @@ jobs:
       - name: Install runtime tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y mysql-client python3 redis-tools git
+          sudo apt-get install -y mysql-client python3 redis-tools git jq
 
       - name: Wait MySQL
         run: |
@@ -97,6 +97,101 @@ jobs:
           app-id: ${{ vars.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: FutureTechQuant
+
+      # 注意：从这一步开始，使用的是 GitHub App token，具备 delete/create repo 权限
+      - name: Delete and recreate target repos
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_OWNER: FutureTechQuant
+        run: |
+          set -euo pipefail
+
+          owner="${GITHUB_OWNER}"
+          token="${GH_TOKEN}"
+
+          api() {
+            local method="$1"
+            local url="$2"
+            shift 2
+            curl -sS -X "${method}" \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "$@" "${url}"
+          }
+
+          delete_repo_if_exists() {
+            local repo="$1"
+            local url="https://api.github.com/repos/${owner}/${repo}"
+
+            echo "==> Check and delete repo if exists: ${owner}/${repo}"
+            status=$(curl -sS -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${url}")
+
+            if [[ "${status}" == "404" ]]; then
+              echo "Repo ${owner}/${repo} not found, skip delete"
+              return
+            fi
+
+            if [[ "${status}" != "200" ]]; then
+              echo "WARN: Unexpected status when getting ${owner}/${repo}: ${status}"
+            fi
+
+            del_status=$(curl -sS -o /dev/null -w "%{http_code}" \
+              -X DELETE \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "${url}")
+
+            if [[ "${del_status}" == "204" ]]; then
+              echo "Deleted repo ${owner}/${repo}"
+            else
+              echo "ERROR: Failed to delete ${owner}/${repo}, status=${del_status}"
+              exit 1
+            fi
+          }
+
+          create_repo() {
+            local repo="$1"
+            local is_private="$2"  # true / false
+            local desc="$3"
+
+            echo "==> Create repo ${owner}/${repo}"
+            payload=$(jq -n \
+              --arg name "${repo}" \
+              --argjson private "${is_private}" \
+              --arg desc "${desc}" \
+              '{name: $name, private: $private, description: $desc, auto_init: false}')
+
+            create_status=$(curl -sS -o /tmp/create-"${repo}".json -w "%{http_code}" \
+              -X POST \
+              -H "Authorization: Bearer ${token}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -H "Content-Type: application/json" \
+              -d "${payload}" \
+              "https://api.github.com/orgs/${owner}/repos")
+
+            if [[ "${create_status}" != "201" ]]; then
+              echo "ERROR: Failed to create repo ${owner}/${repo}, status=${create_status}"
+              echo "Response:"
+              cat /tmp/create-"${repo}".json || true
+              exit 1
+            fi
+
+            echo "Created repo ${owner}/${repo}"
+          }
+
+          # 这里你可以按需要决定 private true/false
+          delete_repo_if_exists "ruoyi-vue-pro"
+          delete_repo_if_exists "yudao-ui-admin-vue3"
+
+          create_repo "ruoyi-vue-pro" true "Auto recreated by future-codegen-bot"
+          create_repo "yudao-ui-admin-vue3" true "Auto recreated by future-codegen-bot"
 
       - name: Run codegen
         env:
