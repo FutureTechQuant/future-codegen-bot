@@ -1,0 +1,47 @@
+name: Frontend Build
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          npm config set registry https://registry.npmmirror.com
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Build
+        run: |
+          BUILD_SCRIPT=$(node -e "const s=require('./package.json').scripts||{}; if (s['build:prod']) console.log('build:prod'); else if (s['build']) console.log('build');")
+          if [ -z "${BUILD_SCRIPT}" ]; then
+            echo "❌ package.json 中未找到 build:prod 或 build 脚本"
+            exit 1
+          fi
+          echo "✅ 使用脚本: ${BUILD_SCRIPT}"
+          npm run "${BUILD_SCRIPT}"
