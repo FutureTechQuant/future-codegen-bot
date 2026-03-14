@@ -30,7 +30,10 @@ clone_target() {
 
   rm -rf "${dir}"
   if [[ -n "${branch}" ]]; then
-    git clone --branch "${branch}" --single-branch "$(repo_url "${repo}")" "${dir}"
+    git clone --branch "${branch}" --single-branch "$(repo_url "${repo}")" "${dir}" || {
+      echo "Branch ${branch} not found in ${repo}, cloning default branch"
+      git clone "$(repo_url "${repo}")" "${dir}"
+    }
   else
     git clone "$(repo_url "${repo}")" "${dir}"
   fi
