@@ -30,11 +30,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm config set registry https://registry.npmmirror.com
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+          npm install
 
       - name: Build
         run: |
