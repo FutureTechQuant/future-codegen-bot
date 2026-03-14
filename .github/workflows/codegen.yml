@@ -8,6 +8,9 @@ on:
       - "tools/**"
       - ".github/workflows/codegen.yml"
 
+permissions:
+  contents: write
+
 jobs:
   gen:
     runs-on: ubuntu-latest
@@ -29,7 +32,7 @@ jobs:
           --health-retries=30
 
     steps:
-      - name: Checkout this repo (SQL + tools)
+      - name: Checkout this repo
         uses: actions/checkout@v5
 
       - name: Checkout ruoyi-vue-pro (latest)
@@ -48,12 +51,12 @@ jobs:
           cache: maven
           cache-dependency-path: ruoyi/pom.xml
 
-      - name: Install mysql-client
+      - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y mysql-client
+          sudo apt-get install -y mysql-client gh rsync
 
-      - name: Run codegen (per sql/schema/*.sql)
+      - name: Run codegen
         env:
           MYSQL_HOST: 127.0.0.1
           MYSQL_PORT: 3306
@@ -62,6 +65,13 @@ jobs:
           CODEGEN_BASE_PACKAGE: cn.iocoder.yudao
         run: |
           bash tools/codegen/run.sh
+
+      - name: Publish generated code
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GITHUB_OWNER: FutureTechQuant
+        run: |
+          bash tools/codegen/publish.sh
 
       - name: Upload generated code
         uses: actions/upload-artifact@v5
