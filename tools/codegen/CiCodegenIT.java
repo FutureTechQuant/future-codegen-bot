@@ -1,5 +1,6 @@
 package ci.codegen;
 
+import cn.iocoder.yudao.framework.mybatis.core.type.EncryptTypeHandler;
 import cn.iocoder.yudao.module.infra.controller.admin.codegen.vo.CodegenCreateListReqVO;
 import cn.iocoder.yudao.module.infra.dal.dataobject.codegen.CodegenTableDO;
 import cn.iocoder.yudao.module.infra.dal.mysql.codegen.CodegenTableMapper;
@@ -208,7 +209,7 @@ public class CiCodegenIT {
         putIfHas(cols, values, "url", jdbcUrl);
         putIfHas(cols, values, "jdbc_url", jdbcUrl);
         putIfHas(cols, values, "username", username);
-        putIfHas(cols, values, "password", password);
+        putIfHas(cols, values, "password", EncryptTypeHandler.encrypt(password));
         putIfHas(cols, values, "db_type", "MySQL");
         putIfHas(cols, values, "database_type", "MySQL");
         putIfHas(cols, values, "status", 0);
