@@ -11,7 +11,11 @@ MYSQL_PORT="${MYSQL_PORT:-3306}"
 MYSQL_USER="${MYSQL_USER:-root}"
 MYSQL_PWD="${MYSQL_PWD:-root}"
 
-# 可选：消除 “Using a password on the command line…” 警告
+cleanup() {
+  rm -f "${MYCNF:-}"
+}
+trap cleanup EXIT
+
 MYCNF="${ROOT}/.tmp.my.cnf"
 cat > "${MYCNF}" <<EOF
 [client]
@@ -44,7 +48,6 @@ echo "ENGINE_FILE=${ENGINE_FILE}"
 echo "MODULE_DIR=${MODULE_DIR}"
 echo "ENGINE_CLASS=${ENGINE_CLASS}"
 
-# 把测试类从本仓库 copy 到 ruoyi 的目标模块
 TEST_DIR="${RUOYI_DIR}/${MODULE_DIR}/src/test/java/ci/codegen"
 mkdir -p "${TEST_DIR}"
 cp -f "${ROOT}/tools/codegen/CiCodegenTest.java" "${TEST_DIR}/CiCodegenTest.java"
@@ -59,12 +62,20 @@ fi
 
 "${mysql_base[@]}" -e "SELECT 1" >/dev/null
 
+echo "==> install module and upstream dependencies into local m2"
+mvn -B -q -f "${RUOYI_DIR}/pom.xml" \
+  -pl "${MODULE_DIR}" \
+  -am \
+  -DskipTests \
+  install
+
 for f in "${sql_files[@]}"; do
   module="$(basename "${f}" .sql)"
   db="codegen_${module}"
   echo "==> module=${module}, db=${db}, sql=${f}"
 
-  "${mysql_base[@]}" -e "DROP DATABASE IF EXISTS \`${db}\`; CREATE DATABASE \`${db}\` DEFAULT CHARACTER SET utf8mb4;"
+  "${mysql_base[@]}" -e "DROP DATABASE IF EXISTS \`${db}\`;"
+  "${mysql_base[@]}" -e "CREATE DATABASE \`${db}\` DEFAULT CHARACTER SET utf8mb4;"
   "${mysql_base[@]}" "${db}" < "${f}"
 
   export DB_URL="jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/${db}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
@@ -72,19 +83,16 @@ for f in "${sql_files[@]}"; do
   export DB_PWD="${MYSQL_PWD}"
   export CODEGEN_MODULE_NAME="${module}"
   export CODEGEN_ENGINE_CLASS="${ENGINE_CLASS}"
-  export CODEGEN_OUTPUT_DIR="${ROOT}/out/generated/${module}"
+  export CODEGEN_OUTPUT_DIR="${OUT_DIR}/${module}"
 
-  rm -rf "${CODEGEN_OUTPUT_DIR}" && mkdir -p "${CODEGEN_OUTPUT_DIR}"
+  rm -rf "${CODEGEN_OUTPUT_DIR}"
+  mkdir -p "${CODEGEN_OUTPUT_DIR}"
 
-  # 1) 先编译依赖，不跑测试
-  mvn -q -f "${RUOYI_DIR}/pom.xml" -pl "${MODULE_DIR}" -am -DskipTests package
-
-  # 2) 只在目标模块里跑我们这一个测试；并允许“其它模块没匹配到该测试”不报错
-  mvn -q -f "${RUOYI_DIR}/pom.xml" -pl "${MODULE_DIR}" \
+  mvn -B -q -f "${RUOYI_DIR}/pom.xml" \
+    -pl "${MODULE_DIR}" \
     -Dtest=ci.codegen.CiCodegenTest \
     -Dsurefire.failIfNoSpecifiedTests=false \
     test
 done
 
-rm -f "${MYCNF}"
-echo "Generated under ${ROOT}/out/generated"
+echo "Generated under ${OUT_DIR}"
