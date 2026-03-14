@@ -124,6 +124,24 @@ def sync_backend(generated_dir: Path, backend_root: Path) -> None:
         print(f"Synced backend module {module_name}")
 
 
+def copy_file(src: Path, dst: Path) -> None:
+    if not src.exists():
+        raise FileNotFoundError(f"template file not found: {src}")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+
+
+def sync_workflow_templates(project_root: Path, backend_root: Path, frontend_root: Path) -> None:
+    backend_template = project_root / "templates" / "workflows" / "backend-maven.yml"
+    frontend_template = project_root / "templates" / "workflows" / "frontend-build.yml"
+
+    copy_file(backend_template, backend_root / ".github" / "workflows" / "maven.yml")
+    print(f"Synced backend workflow from {backend_template}")
+
+    copy_file(frontend_template, frontend_root / ".github" / "workflows" / "build.yml")
+    print(f"Synced frontend workflow from {frontend_template}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--generated-dir", required=True)
@@ -131,6 +149,7 @@ def main() -> None:
     parser.add_argument("--frontend-root", required=True)
     args = parser.parse_args()
 
+    project_root = Path(__file__).resolve().parents[2]
     generated_dir = Path(args.generated_dir).resolve()
     backend_root = Path(args.backend_root).resolve()
     frontend_root = Path(args.frontend_root).resolve()
@@ -144,6 +163,7 @@ def main() -> None:
 
     sync_frontend(generated_dir, frontend_root)
     sync_backend(generated_dir, backend_root)
+    sync_workflow_templates(project_root, backend_root, frontend_root)
 
 
 if __name__ == "__main__":
