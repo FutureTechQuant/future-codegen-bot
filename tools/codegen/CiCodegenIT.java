@@ -97,36 +97,31 @@ public class CiCodegenIT {
     }
 
     private static void normalizeTable(CodegenTableDO table, String moduleName, String basePackage, String tablePrefix) {
-        table.setScene(CodegenSceneEnum.ADMIN.getScene());
+            table.setScene(CodegenSceneEnum.ADMIN.getScene());
+        
+            if (table.getFrontType() == null) {
+                table.setFrontType(CodegenFrontTypeEnum.VUE3_ELEMENT_PLUS.getType());
+            }
+            if (table.getTemplateType() == null) {
+                table.setTemplateType(CodegenTemplateTypeEnum.ONE.getType());
+            }
+            if (isBlank(table.getModuleName())) {
+                table.setModuleName(moduleName);
+            }
+            if (isBlank(table.getBusinessName()) && !isBlank(table.getTableName())) {
+                table.setBusinessName(stripPrefix(table.getTableName(), tablePrefix));
+            }
+            if (isBlank(table.getClassName()) && !isBlank(table.getTableName())) {
+                table.setClassName(toClassName(table.getTableName()));
+            }
+            if (isBlank(table.getAuthor())) {
+                table.setAuthor("ci-codegen");
+            }
+            if (table.getParentMenuId() == null) {
+                table.setParentMenuId(0L);
+            }
+        }
 
-        if (table.getFrontType() == null) {
-            table.setFrontType(CodegenFrontTypeEnum.VUE3_ELEMENT_PLUS.getType());
-        }
-        if (table.getTemplateType() == null) {
-            table.setTemplateType(CodegenTemplateTypeEnum.ONE.getType());
-        }
-        if (isBlank(table.getModuleName())) {
-            table.setModuleName(moduleName);
-        }
-        if (isBlank(table.getBusinessName()) && !isBlank(table.getTableName())) {
-            table.setBusinessName(stripPrefix(table.getTableName(), tablePrefix));
-        }
-        if (isBlank(table.getClassName()) && !isBlank(table.getTableName())) {
-            table.setClassName(toClassName(table.getTableName()));
-        }
-        if (isBlank(table.getPackageName())) {
-            table.setPackageName(basePackage + ".module." + moduleName);
-        }
-        if (isBlank(table.getAuthor())) {
-            table.setAuthor("ci-codegen");
-        }
-        if (isBlank(table.getMenuName())) {
-            table.setMenuName(isBlank(table.getTableComment()) ? table.getClassName() : table.getTableComment());
-        }
-        if (table.getParentMenuId() == null) {
-            table.setParentMenuId(0L);
-        }
-    }
 
     private static void assertNoUnresolvedTemplateVars(String tableName, Map<String, String> files) {
         List<String> badFiles = files.entrySet().stream()
