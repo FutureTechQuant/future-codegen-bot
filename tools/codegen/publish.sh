@@ -10,9 +10,12 @@ BACKEND_REPO="ruoyi-vue-pro"
 FRONTEND_REPO="yudao-ui-admin-vue3"
 BACKEND_BRANCH="${BACKEND_BRANCH:-master-jdk17}"
 
-# Gitee 源仓库
+# Gitee 源仓库（代码来源）
 GITEE_BACKEND_URL="https://gitee.com/zhijiantianya/ruoyi-vue-pro.git"
+GITEE_BACKEND_BRANCH="master-jdk17"
+
 GITEE_FRONTEND_URL="https://gitee.com/yudaocode/yudao-ui-admin-vue3.git"
+GITEE_FRONTEND_BRANCH="master"
 
 require_env() {
   local name="$1"
@@ -97,26 +100,44 @@ create_repo() {
   echo "Created repo ${owner}/${repo}"
 }
 
-create_repo_from_gitee() {
+# 从 Gitee 拉指定分支的工作区快照，作为 GitHub 仓库的初始内容
+bootstrap_repo_from_gitee() {
   local repo="$1"
   local gitee_url="$2"
-  local description="$3"
+  local gitee_branch="$3"
+  local description="$4"
 
-  local tmp_dir="${WORK_DIR}/gitee-${repo}"
-  rm -rf "${tmp_dir}"
-  mkdir -p "${tmp_dir}"
+  local tmp_work="${WORK_DIR}/gitee-working-${repo}"
+  local tmp_init="${WORK_DIR}/init-${repo}"
 
-  echo "==> Clone from Gitee: ${gitee_url}"
-  git clone --mirror "${gitee_url}" "${tmp_dir}"
+  rm -rf "${tmp_work}" "${tmp_init}"
+  mkdir -p "${tmp_work}" "${tmp_init}"
 
-  # 在 GitHub 创建 org 仓库
+  echo "==> Shallow clone from Gitee: ${gitee_url} (branch ${gitee_branch})"
+  git clone --depth 1 --branch "${gitee_branch}" "${gitee_url}" "${tmp_work}"
+
+  # 可选：这里可以删除超大文件，避免推到 GitHub。
+  # 例如：
+  # rm -f "${tmp_work}/yudao-admin-ui/src/assets/icons/svg/Mockitt-win32-x64-zh-1.1.7.exe"
+
+  # 删掉 Gitee 的 .git，只保留工作区文件
+  rm -rf "${tmp_work}/.git"
+
+  # 在 tmp_init 里初始化一个新的 Git 仓库，内容来自 tmp_work
+  echo "==> Prepare initial Git history for ${repo}"
+  cp -R "${tmp_work}/." "${tmp_init}/"
+
+  cd "${tmp_init}"
+  git init -b main
+  git add -A
+  git commit -m "chore: bootstrap from Gitee ${gitee_branch}"
+
+  # 创建 GitHub 仓库
   create_repo "${repo}" "${description}" true
 
-  # 推送到 GitHub
-  cd "${tmp_dir}"
-  git remote set-url origin "$(repo_url "${repo}")"
-  echo "==> Push mirror to GitHub ${OWNER}/${repo}"
-  git push --mirror
+  git remote add origin "$(repo_url "${repo}")"
+  echo "==> Push initial snapshot to GitHub ${OWNER}/${repo}"
+  git push -u origin main
 }
 
 clone_target() {
@@ -175,9 +196,9 @@ echo "==> Delete existing GitHub repos if any"
 delete_repo_if_exists "${BACKEND_REPO}"
 delete_repo_if_exists "${FRONTEND_REPO}"
 
-echo "==> Recreate repos from Gitee"
-create_repo_from_gitee "${BACKEND_REPO}" "${GITEE_BACKEND_URL}" "Backend repo synced from Gitee + codegen"
-create_repo_from_gitee "${FRONTEND_REPO}" "${GITEE_FRONTEND_URL}" "Frontend repo synced from Gitee + codegen"
+echo "==> Bootstrap new repos from Gitee working tree"
+bootstrap_repo_from_gitee "${BACKEND_REPO}" "${GITEE_BACKEND_URL}" "${GITEE_BACKEND_BRANCH}" "Backend repo synced from Gitee branch ${GITEE_BACKEND_BRANCH} + codegen"
+bootstrap_repo_from_gitee "${FRONTEND_REPO}" "${GITEE_FRONTEND_URL}" "${GITEE_FRONTEND_BRANCH}" "Frontend repo synced from Gitee branch ${GITEE_FRONTEND_BRANCH} + codegen"
 
 echo "==> Clone recreated GitHub repos"
 clone_target "${BACKEND_REPO}" "${BACKEND_DIR}" "${BACKEND_BRANCH}"
