@@ -1,0 +1,17 @@
+spring:
+  datasource:
+    dynamic:
+      primary: master
+      strict: false
+      datasource:
+        master:
+          url: ${DB_URL}
+          username: ${DB_USER}
+          password: ${DB_PWD}
+          driver-class-name: com.mysql.cj.jdbc.Driver
+
+yudao:
+  codegen:
+    vo-type: 10
+    unit-test-enable: false
+    front-type: 20
