@@ -9,11 +9,6 @@ OWNER="${GITHUB_OWNER:-FutureTechQuant}"
 BACKEND_REPO="ruoyi-vue-pro"
 FRONTEND_REPO="yudao-ui-admin-vue3"
 
-BACKEND_UPSTREAM="https://gitee.com/zhijiantianya/ruoyi-vue-pro.git"
-FRONTEND_UPSTREAM="https://gitee.com/yudaocode/yudao-ui-admin-vue3.git"
-
-TARGET_REPO_VISIBILITY="${TARGET_REPO_VISIBILITY:-private}"
-
 require_env() {
   local name="$1"
   if [[ -z "${!name:-}" ]]; then
@@ -22,58 +17,16 @@ require_env() {
   fi
 }
 
-git config --global user.name "future-codegen-bot"
-git config --global user.email "actions@users.noreply.github.com"
-
-require_env GH_TOKEN
-mkdir -p "${WORK_DIR}"
-
 repo_url() {
   local repo="$1"
   echo "https://x-access-token:${GH_TOKEN}@github.com/${OWNER}/${repo}.git"
 }
 
-delete_repo_if_exists() {
-  local repo="$1"
+git config --global user.name "future-codegen-bot"
+git config --global user.email "actions@users.noreply.github.com"
 
-  if gh repo view "${OWNER}/${repo}" >/dev/null 2>&1; then
-    echo "Deleting ${OWNER}/${repo}"
-    gh repo delete "${OWNER}/${repo}" --yes
-
-    for _ in $(seq 1 60); do
-      if ! gh repo view "${OWNER}/${repo}" >/dev/null 2>&1; then
-        echo "Deleted ${OWNER}/${repo}"
-        return
-      fi
-      sleep 2
-    done
-
-    echo "ERROR: timed out waiting for ${OWNER}/${repo} deletion"
-    exit 1
-  fi
-}
-
-create_empty_repo() {
-  local repo="$1"
-
-  if [[ "${TARGET_REPO_VISIBILITY}" == "public" ]]; then
-    gh repo create "${OWNER}/${repo}" --public
-  else
-    gh repo create "${OWNER}/${repo}" --private
-  fi
-}
-
-seed_repo_from_upstream() {
-  local repo="$1"
-  local upstream="$2"
-  local bare_dir="${WORK_DIR}/seed-${repo}.git"
-
-  rm -rf "${bare_dir}"
-  git clone --bare "${upstream}" "${bare_dir}"
-
-  create_empty_repo "${repo}"
-  git -C "${bare_dir}" push --mirror "$(repo_url "${repo}")"
-}
+require_env GH_TOKEN
+mkdir -p "${WORK_DIR}"
 
 clone_target() {
   local repo="$1"
@@ -83,17 +36,8 @@ clone_target() {
   git clone "$(repo_url "${repo}")" "${dir}"
 }
 
-copy_tree_contents() {
-  local src_dir="$1"
-  local dst_dir="$2"
-
-  [[ -d "${src_dir}" ]] || return 0
-  mkdir -p "${dst_dir}"
-  cp -R "${src_dir}/." "${dst_dir}/"
-}
-
-find_generated_frontend_src() {
-  find "${OUT_DIR}" -type d -path "*/yudao-ui-admin-vue3/src" | head -n 1
+find_generated_frontend_src_dirs() {
+  find "${OUT_DIR}" -type d -path "*/yudao-ui-admin-vue3/src"
 }
 
 find_generated_modules() {
@@ -133,8 +77,8 @@ ensure_root_module_declared() {
 from pathlib import Path
 p = Path(r"${root_pom}")
 s = p.read_text(encoding="utf-8")
-needle = "</modules>"
 insert = f"        <module>${module_name}</module>\n"
+needle = "</modules>"
 if needle in s and insert.strip() not in s:
     s = s.replace(needle, insert + "    </modules>", 1)
 p.write_text(s, encoding="utf-8")
@@ -168,14 +112,18 @@ PY
 
 sync_frontend_generated() {
   local frontend_root="$1"
-  local generated_src
+  local found=0
 
-  generated_src="$(find_generated_frontend_src || true)"
-  if [[ -n "${generated_src}" && -d "${generated_src}" ]]; then
-    mkdir -p "${frontend_root}/src"
-    cp -R "${generated_src}/." "${frontend_root}/src/"
-    echo "Synced frontend src from ${generated_src}"
-  else
+  mkdir -p "${frontend_root}/src"
+
+  while IFS= read -r src_dir; do
+    [[ -n "${src_dir}" ]] || continue
+    found=1
+    cp -R "${src_dir}/." "${frontend_root}/src/"
+    echo "Synced frontend src from ${src_dir}"
+  done < <(find_generated_frontend_src_dirs)
+
+  if [[ "${found}" -eq 0 ]]; then
     echo "No generated frontend src found"
   fi
 }
@@ -187,6 +135,9 @@ sync_backend_generated() {
   while IFS= read -r module_dir; do
     [[ -n "${module_dir}" ]] || continue
     found=1
+
+    local module_name
+    local target_module_dir
 
     module_name="$(basename "${module_dir}")"
     target_module_dir="${backend_root}/${module_name}"
@@ -222,18 +173,10 @@ commit_and_push() {
   git push origin HEAD
 }
 
-echo "==> Recreate target repositories"
-delete_repo_if_exists "${BACKEND_REPO}"
-delete_repo_if_exists "${FRONTEND_REPO}"
-
-echo "==> Seed repositories from Gitee upstream"
-seed_repo_from_upstream "${BACKEND_REPO}" "${BACKEND_UPSTREAM}"
-seed_repo_from_upstream "${FRONTEND_REPO}" "${FRONTEND_UPSTREAM}"
-
 BACKEND_DIR="${WORK_DIR}/${BACKEND_REPO}"
 FRONTEND_DIR="${WORK_DIR}/${FRONTEND_REPO}"
 
-echo "==> Clone fresh target repositories"
+echo "==> Clone target repositories"
 clone_target "${BACKEND_REPO}" "${BACKEND_DIR}"
 clone_target "${FRONTEND_REPO}" "${FRONTEND_DIR}"
 
