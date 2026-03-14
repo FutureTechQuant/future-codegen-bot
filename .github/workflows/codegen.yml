@@ -80,12 +80,14 @@ jobs:
           GITHUB_OWNER: FutureTechQuant
           TARGET_REPO_VISIBILITY: private
           RECREATE_TIMEOUT_SECONDS: 900
+          BACKEND_BRANCH: master-jdk17
         run: |
           set -euo pipefail
 
           OWNER="${GITHUB_OWNER}"
           VISIBILITY="${TARGET_REPO_VISIBILITY:-private}"
           TIMEOUT_SECONDS="${RECREATE_TIMEOUT_SECONDS:-900}"
+          BACKEND_BRANCH="${BACKEND_BRANCH:-master-jdk17}"
 
           BACKEND_REPO="ruoyi-vue-pro"
           FRONTEND_REPO="yudao-ui-admin-vue3"
@@ -151,6 +153,7 @@ jobs:
           recreate_from_upstream() {
             local repo="$1"
             local upstream="$2"
+            local branch="${3:-}"
             local seed_dir="${RUNNER_TEMP}/seed-${repo}"
 
             echo "==> recreate ${OWNER}/${repo}"
@@ -163,20 +166,30 @@ jobs:
             create_repo_with_retry "${repo}"
 
             rm -rf "${seed_dir}"
-            git clone "${upstream}" "${seed_dir}"
+            if [[ -n "${branch}" ]]; then
+              git clone --branch "${branch}" --single-branch "${upstream}" "${seed_dir}"
+            else
+              git clone "${upstream}" "${seed_dir}"
+            fi
 
             git -C "${seed_dir}" remote remove origin || true
             git -C "${seed_dir}" remote add origin "$(repo_url "${repo}")"
-            git -C "${seed_dir}" push -u origin HEAD
+
+            if [[ -n "${branch}" ]]; then
+              git -C "${seed_dir}" push -u origin "HEAD:${branch}"
+            else
+              git -C "${seed_dir}" push -u origin HEAD
+            fi
           }
 
-          recreate_from_upstream "${BACKEND_REPO}" "${BACKEND_UPSTREAM}"
+          recreate_from_upstream "${BACKEND_REPO}" "${BACKEND_UPSTREAM}" "${BACKEND_BRANCH}"
           recreate_from_upstream "${FRONTEND_REPO}" "${FRONTEND_UPSTREAM}"
 
       - name: Publish generated code
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_OWNER: FutureTechQuant
+          BACKEND_BRANCH: master-jdk17
         run: |
           bash tools/codegen/publish.sh
 
