@@ -78,14 +78,14 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_OWNER: FutureTechQuant
-          TARGET_REPO_VISIBILITY: private
+          TARGET_REPO_VISIBILITY: public
           RECREATE_TIMEOUT_SECONDS: 900
           BACKEND_BRANCH: master-jdk17
         run: |
           set -euo pipefail
 
           OWNER="${GITHUB_OWNER}"
-          VISIBILITY="${TARGET_REPO_VISIBILITY:-private}"
+          VISIBILITY="${TARGET_REPO_VISIBILITY:-public}"
           TIMEOUT_SECONDS="${RECREATE_TIMEOUT_SECONDS:-900}"
           BACKEND_BRANCH="${BACKEND_BRANCH:-master-jdk17}"
 
