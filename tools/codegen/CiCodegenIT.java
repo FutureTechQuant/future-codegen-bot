@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(
         classes = YudaoServerApplication.class,
-        webEnvironment = SpringBootTest.WebEnvironment.NONE
+        webEnvironment = SpringBootTest.WebEnvironment.MOCK
 )
 @ActiveProfiles({"local", "ci-codegen"})
 public class CiCodegenIT {
