@@ -21,7 +21,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.*;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -31,6 +30,8 @@ import static org.junit.jupiter.api.Assertions.*;
 )
 @ActiveProfiles({"local", "ci-codegen"})
 public class CiCodegenIT {
+
+    private static final String TEMP_ERROR_CODE_FILE_NAME = "ErrorCodeConstants_手动操作.java";
 
     @Resource
     private CodegenService codegenService;
@@ -52,6 +53,21 @@ public class CiCodegenIT {
         String outDir = mustEnv("CODEGEN_OUTPUT_DIR");
         String moduleName = mustEnv("CODEGEN_MODULE_NAME");
         String tablePrefix = System.getenv().getOrDefault("CODEGEN_TABLE_PREFIX", moduleName + "_");
+
+        Path outBase = Path.of(outDir);
+        Path mergedErrorFile = outBase.resolve(
+                "yudao-module-" + moduleName
+                        + "/src/main/java/cn/iocoder/yudao/module/" + moduleName
+                        + "/enums/AllGeneratedErrorCodes.java"
+        );
+        Path singleErrorFile = outBase.resolve(
+                "yudao-module-" + moduleName
+                        + "/src/main/java/cn/iocoder/yudao/module/" + moduleName
+                        + "/enums/" + TEMP_ERROR_CODE_FILE_NAME
+        );
+
+        StringBuilder allErrors = new StringBuilder();
+        allErrors.append(buildAllGeneratedErrorCodesHeader(moduleName));
 
         try (Connection conn = dataSource.getConnection()) {
             String schema = conn.getCatalog();
@@ -75,8 +91,6 @@ public class CiCodegenIT {
             List<Long> ids = codegenService.createCodegenList("ci-codegen", reqVO);
             assertEquals(tableNames.size(), ids.size(), "Imported table count mismatch");
 
-            Path outBase = Path.of(outDir);
-
             for (Long tableId : ids) {
                 CodegenTableDO table = codegenTableMapper.selectById(tableId);
                 assertNotNull(table, "Imported codegen table missing: " + tableId);
@@ -89,49 +103,25 @@ public class CiCodegenIT {
 
                 assertNoUnresolvedTemplateVars(table.getTableName(), files);
                 writeAll(outBase, files);
+
+                if (Files.exists(singleErrorFile)) {
+                    String content = Files.readString(singleErrorFile, StandardCharsets.UTF_8);
+                    String tableDisplayName = !isBlank(table.getClassName()) ? table.getClassName() : table.getTableName();
+                    String constants = extractConstants(content, tableDisplayName);
+                    if (!constants.isBlank()) {
+                        allErrors.append(constants).append("\n");
+                    }
+                    Files.deleteIfExists(singleErrorFile);
+                }
             }
         }
+
+        allErrors.append("}\n");
+        Files.createDirectories(mergedErrorFile.getParent());
+        Files.writeString(mergedErrorFile, allErrors.toString(), StandardCharsets.UTF_8);
 
         System.out.println("codegenProperties.voType = " + codegenProperties.getVoType());
         System.out.println("codegenProperties.frontType = " + codegenProperties.getFrontType());
-
-        // ========== 合并所有错误码到一个文件 ==========
-        Path errorFile = outBase.resolve("yudao-module-" + moduleName + 
-            "/src/main/java/cn/iocoder/yudao/module/" + moduleName + "/enums/AllGeneratedErrorCodes.java");
-        Files.createDirectories(errorFile.getParent());
-        
-        StringBuilder allErrors = new StringBuilder();
-        allErrors.append("""
-            package cn.iocoder.yudao.module.""" + moduleName + """.enums;
-            
-            import cn.iocoder.yudao.framework.common.exception.ErrorCode;
-            
-            /**
-             * 所有自动生成错误码汇总（临时编号）
-             * 请按模块规划正式号段后，复制到 ErrorCodeConstants
-             */
-            public interface AllGeneratedErrorCodes {
-            
-            """);
-        
-        for (Long tableId : ids) {
-            CodegenTableDO table = codegenTableMapper.selectById(tableId);
-            // 读取刚才生成的 ErrorCodeConstants_手动操作.java
-            Path singleErrorFile = outBase.resolve("yudao-module-" + moduleName + 
-                "/src/main/java/cn/iocoder/yudao/module/" + moduleName + "/enums/ErrorCodeConstants_手动操作.java");
-            if (Files.exists(singleErrorFile)) {
-                String content = Files.readString(singleErrorFile, StandardCharsets.UTF_8);
-                // 提取 interface 内的常量定义（去掉包名、import、interface定义）
-                String constants = extractConstants(content, table.getClassName());
-                allErrors.append(constants).append("\n\n");
-                // 删除单个文件，避免混乱
-                Files.delete(singleErrorFile);
-            }
-        }
-        
-        allErrors.append("}");
-        Files.writeString(errorFile, allErrors.toString(), StandardCharsets.UTF_8);
-
     }
 
     private static void normalizeTable(CodegenTableDO table, String moduleName, String tablePrefix) {
@@ -161,64 +151,63 @@ public class CiCodegenIT {
     }
 
     private static void assertNoUnresolvedTemplateVars(String tableName, Map<String, String> files) {
-            List<String> suspiciousTokens = List.of(
-                    "${saveReqVOClass}",
-                    "${saveReqVOVar}",
-                    "${updateReqVOClass}",
-                    "${updateReqVOVar}",
-                    "${respVOClass}",
-                    "${table.classComment}",
-                    "${classComment}",
-                    "${requestClass}",
-                    "${responseClass}"
-            );
-        
-            List<String> backendExt = List.of(".java", ".xml", ".sql", ".yml", ".yaml", ".properties", ".kt");
-            List<String> badFiles = new ArrayList<>();
-            String firstSnippet = null;
-            String firstFile = null;
-        
-            for (Map.Entry<String, String> e : files.entrySet()) {
-                String path = e.getKey();
-                String content = e.getValue();
-                if (content == null) {
-                    continue;
-                }
-        
-                boolean targetedHit = suspiciousTokens.stream().anyMatch(content::contains);
-                boolean backendBroadHit = backendExt.stream().anyMatch(path::endsWith) && content.contains("${");
-        
-                if (!targetedHit && !backendBroadHit) {
-                    continue;
-                }
-        
-                badFiles.add(path);
-                if (firstSnippet == null) {
-                    firstFile = path;
-                    firstSnippet = content.substring(0, Math.min(content.length(), 1200));
-                }
+        List<String> suspiciousTokens = List.of(
+                "${saveReqVOClass}",
+                "${saveReqVOVar}",
+                "${updateReqVOClass}",
+                "${updateReqVOVar}",
+                "${respVOClass}",
+                "${table.classComment}",
+                "${classComment}",
+                "${requestClass}",
+                "${responseClass}"
+        );
+
+        List<String> backendExt = List.of(".java", ".xml", ".sql", ".yml", ".yaml", ".properties", ".kt");
+        List<String> badFiles = new ArrayList<>();
+        String firstSnippet = null;
+        String firstFile = null;
+
+        for (Map.Entry<String, String> e : files.entrySet()) {
+            String path = e.getKey();
+            String content = e.getValue();
+            if (content == null) {
+                continue;
             }
-        
-            if (!badFiles.isEmpty()) {
-                throw new AssertionError(
-                        "Unresolved template vars found, table=" + tableName
-                                + ", files=" + badFiles
-                                + ", firstFile=" + firstFile
-                                + "\n" + firstSnippet
-                );
+
+            boolean targetedHit = suspiciousTokens.stream().anyMatch(content::contains);
+            boolean backendBroadHit = backendExt.stream().anyMatch(path::endsWith) && content.contains("${");
+
+            if (!targetedHit && !backendBroadHit) {
+                continue;
+            }
+
+            badFiles.add(path);
+            if (firstSnippet == null) {
+                firstFile = path;
+                firstSnippet = content.substring(0, Math.min(content.length(), 1200));
             }
         }
 
+        if (!badFiles.isEmpty()) {
+            throw new AssertionError(
+                    "Unresolved template vars found, table=" + tableName
+                            + ", files=" + badFiles
+                            + ", firstFile=" + firstFile
+                            + "\n" + firstSnippet
+            );
+        }
+    }
 
     private static List<String> listBusinessTables(Connection conn, String schema, String tablePrefix) throws SQLException {
-        String sql = """
-                SELECT table_name
-                FROM information_schema.tables
-                WHERE table_schema = ?
-                  AND table_type = 'BASE TABLE'
-                  AND table_name LIKE ?
-                ORDER BY table_name
-                """;
+        String sql =
+                "SELECT table_name " +
+                "FROM information_schema.tables " +
+                "WHERE table_schema = ? " +
+                "  AND table_type = 'BASE TABLE' " +
+                "  AND table_name LIKE ? " +
+                "ORDER BY table_name";
+
         List<String> list = new ArrayList<>();
         try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, schema);
@@ -328,11 +317,12 @@ public class CiCodegenIT {
     }
 
     private static void ensureTableExists(Connection conn, String schema, String tableName) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement("""
-                SELECT COUNT(*)
-                FROM information_schema.tables
-                WHERE table_schema = ? AND table_name = ?
-                """)) {
+        String sql =
+                "SELECT COUNT(*) " +
+                "FROM information_schema.tables " +
+                "WHERE table_schema = ? AND table_name = ?";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, schema);
             ps.setString(2, tableName);
             try (ResultSet rs = ps.executeQuery()) {
@@ -346,12 +336,13 @@ public class CiCodegenIT {
 
     private static Set<String> loadTableColumns(Connection conn, String schema, String tableName) throws SQLException {
         Set<String> cols = new LinkedHashSet<>();
-        try (PreparedStatement ps = conn.prepareStatement("""
-                SELECT column_name
-                FROM information_schema.columns
-                WHERE table_schema = ? AND table_name = ?
-                ORDER BY ordinal_position
-                """)) {
+        String sql =
+                "SELECT column_name " +
+                "FROM information_schema.columns " +
+                "WHERE table_schema = ? AND table_name = ? " +
+                "ORDER BY ordinal_position";
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, schema);
             ps.setString(2, tableName);
             try (ResultSet rs = ps.executeQuery()) {
@@ -388,7 +379,8 @@ public class CiCodegenIT {
         StringBuilder sb = new StringBuilder();
         for (String part : name.split("_")) {
             if (!part.isEmpty()) {
-                sb.append(part.substring(0, 1).toUpperCase(Locale.ROOT)).append(part.substring(1));
+                sb.append(part.substring(0, 1).toUpperCase(Locale.ROOT))
+                        .append(part.substring(1));
             }
         }
         return sb.toString();
@@ -406,25 +398,69 @@ public class CiCodegenIT {
         return v;
     }
 
-        private static String extractConstants(String fileContent, String tableName) {
-            // 简单提取 interface 内的常量行，保留表名注释
-            String[] lines = fileContent.split("\n");
-            StringBuilder sb = new StringBuilder();
-            sb.append("// ========== ").append(tableName).append(" 表错误码 ==========\n");
-            boolean inInterface = false;
-            for (String line : lines) {
-                if (line.contains("public interface")) {
+    private static String buildAllGeneratedErrorCodesHeader(String moduleName) {
+        return "package cn.iocoder.yudao.module." + moduleName + ".enums;\n\n"
+                + "import cn.iocoder.yudao.framework.common.exception.ErrorCode;\n\n"
+                + "/**\n"
+                + " * 所有自动生成错误码汇总（临时编号）\n"
+                + " * 请按模块规划正式号段后，复制到 ErrorCodeConstants\n"
+                + " */\n"
+                + "public interface AllGeneratedErrorCodes {\n\n";
+    }
+
+    private static String extractConstants(String fileContent, String tableName) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("    // ========== ").append(tableName).append(" 表错误码 ==========\n");
+
+        String[] lines = fileContent.split("\\R");
+        boolean inInterface = false;
+        boolean collecting = false;
+        StringBuilder current = new StringBuilder();
+
+        for (String line : lines) {
+            String trimmed = line.trim();
+
+            if (!inInterface) {
+                if (trimmed.startsWith("public interface ")) {
                     inInterface = true;
-                    continue;
                 }
-                if (inInterface && line.trim().startsWith("ErrorCode")) {
-                    sb.append(line).append("\n");
+                continue;
+            }
+
+            if (trimmed.equals("}")) {
+                if (collecting) {
+                    collecting = false;
+                    current.setLength(0);
                 }
-                if (line.contains("}")) {
-                    inInterface = false;
+                break;
+            }
+
+            if (!collecting && trimmed.startsWith("ErrorCode ")) {
+                collecting = true;
+                current.setLength(0);
+                current.append("    ").append(trimmed).append("\n");
+                if (trimmed.endsWith(";")) {
+                    sb.append(current).append("\n");
+                    collecting = false;
+                    current.setLength(0);
+                }
+                continue;
+            }
+
+            if (collecting) {
+                if (!trimmed.isEmpty()) {
+                    current.append("    ").append(trimmed).append("\n");
+                } else {
+                    current.append("\n");
+                }
+                if (trimmed.endsWith(";")) {
+                    sb.append(current).append("\n");
+                    collecting = false;
+                    current.setLength(0);
                 }
             }
-            return sb.toString();
         }
 
+        return sb.toString();
+    }
 }
