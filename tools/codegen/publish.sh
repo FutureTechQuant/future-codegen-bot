@@ -106,7 +106,6 @@ bootstrap_repo_from_gitee() {
   local gitee_url="$2"
   local gitee_branch="$3"
   local description="$4"
-  local private_flag="${5:-true}"
 
   local tmp_work="${WORK_DIR}/gitee-working-${repo}"
   local tmp_init="${WORK_DIR}/init-${repo}"
@@ -134,7 +133,7 @@ bootstrap_repo_from_gitee() {
   git commit -m "chore: bootstrap from Gitee ${gitee_branch}"
 
   # 创建 GitHub 仓库
-  create_repo "${repo}" "${description}" "${private_flag}"
+  create_repo "${repo}" "${description}" false
 
   git remote add origin "$(repo_url "${repo}")"
   echo "==> Push initial snapshot to GitHub ${OWNER}/${repo} (${gitee_branch})"
