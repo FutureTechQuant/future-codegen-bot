@@ -8,7 +8,7 @@ import cn.iocoder.yudao.framework.common.exception.ErrorCode;
  * 代码生成占位错误码（自动生成，临时编号）
  * 使用前请将常量拷贝到正式的 ErrorCodeConstants 中，并调整编号
  */
-public interface ErrorCodeConstants {
+public interface ErrorCodeConstants_${simpleClassName_underlineCase.toUpperCase() {
 
     // ========== ${table.classComment} 1-999-000-000（临时编号，后续需要改成模块号段） ==========
     ErrorCode ${simpleClassName_underlineCase.toUpperCase()}_NOT_EXISTS =
